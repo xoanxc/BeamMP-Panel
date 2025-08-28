@@ -10,6 +10,7 @@ Este repositorio contiene un script `install.sh` que instala y configura automá
 
 ```bash
 git clone https://github.com/xoanxc/BeamMP-Panel.git
+cd ./BeamMP-Panel
 chmod +x install.sh
 ./install.sh
 ```
