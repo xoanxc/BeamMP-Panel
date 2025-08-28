@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>BeamMP Control Panel</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="container">
+    <h1>BeamMP Control Panel</h1>
+
+    <!-- Mostrar mapa actual -->
+    <div class="status">
+        <p>Mapa actual: <span class="highlight">{{ current_map }}</span></p>
+    </div>
+
+    <!-- Sección Mapas Normales -->
+    <section>
+        <h2>Mapas normales</h2>
+        <form method="post">
+            <select name="map_normal">
+                {% for name in maps_normal.keys() %}
+                    <option value="{{name}}">{{name}}</option>
+                {% endfor %}
+            </select>
+            <button type="submit">Cambiar mapa</button>
+        </form>
+    </section>
+
+    <!-- Sección Mapas de Mods -->
+    <section>
+        <h2>Mapas de mods</h2>
+        <form method="post">
+            <select name="map_mod">
+                {% for name in maps_mods.keys() %}
+                    <option value="{{name}}">{{name}}</option>
+                {% endfor %}
+            </select>
+            <button type="submit">Cambiar mapa</button>
+        </form>
+    </section>
+</div>
+</body>
+</html>
