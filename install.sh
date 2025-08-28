@@ -2,14 +2,20 @@
 set -e
 
 APP_DIR="/opt/beammp-web"
-BEAMMP_DIR="/opt/beammp-server"
+BEAMMP_DIR="/opt/beammp"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SERVICE_PANEL="/etc/systemd/system/beammp-web.service"
 SERVICE_BEAMMP="/etc/systemd/system/beammp.service"
 
 # ------------------------------
-# Detectar distro, versión y arquitectura
+# Limpiar instalaciones previas
 # ------------------------------
-echo "Detectando sistema..."
+echo "Eliminando instalaciones previas en /opt..."
+rm -rf "$BEAMMP_DIR" "$APP_DIR"
+
+# ------------------------------
+# Detectar distro y arquitectura
+# ------------------------------
 if command -v lsb_release >/dev/null 2>&1; then
     DISTRO=$(lsb_release -is | tr '[:upper:]' '[:lower:]')
     DISTROVERSION=$(lsb_release -rs | cut -d. -f1)
@@ -17,6 +23,13 @@ else
     source /etc/os-release
     DISTRO=$(echo "$ID" | tr '[:upper:]' '[:lower:]')
     DISTROVERSION=$(echo "$VERSION_ID" | cut -d. -f1)
+fi
+
+# Si no se detecta versión, asignar por defecto
+if [ "$DISTRO" = "debian" ] && [ -z "$DISTROVERSION" ]; then
+    DISTROVERSION="12"
+elif [ "$DISTRO" = "ubuntu" ] && [ -z "$DISTROVERSION" ]; then
+    DISTROVERSION="22.04"
 fi
 
 ARCH=$(uname -m)
@@ -31,9 +44,9 @@ echo "Detectado: $DISTRO $DISTROVERSION $ARCH"
 # ------------------------------
 # Instalar dependencias
 # ------------------------------
-echo "Instalando dependencias del panel y del servidor (se mostrará progreso)..."
+echo "Instalando dependencias..."
 apt update -y
-apt install -y python3 python3-venv python3-pip git curl unzip liblua5.3-dev cmake make g++ tar zip
+apt install -y python3 python3-venv python3-pip git curl unzip wget liblua5.3-dev cmake make g++ tar zip
 
 # ------------------------------
 # Descargar e instalar BeamMP Server
@@ -74,21 +87,22 @@ echo "Descargando BeamMP Server..."
 wget -q "$URL" -O BeamMP-Server
 chmod +x BeamMP-Server
 
-echo "Ejecutando BeamMP por primera vez para generar configuración..."
-./BeamMP-Server || true
-sleep 2
-
-# Crear ServerConfig.toml básico si no existe
+# ------------------------------
+# Ejecutar BeamMP Server inicialmente para generar archivos si no existen
+# ------------------------------
 if [ ! -f "$BEAMMP_DIR/ServerConfig.toml" ]; then
-    echo "Creando configuración inicial del servidor..."
-    cat > "$BEAMMP_DIR/ServerConfig.toml" <<EOF
-[General]
-Name = "Servidor BeamMP"
-Port = 30814
-MaxPlayers = 8
-Private = false
-EOF
+    echo "Ejecutando BeamMP Server por primera vez (silencioso) para generar archivos..."
+    ./BeamMP-Server &> /dev/null &
+    SERVER_PID=$!
+    sleep 3
+    kill $SERVER_PID || true
 fi
+
+# ------------------------------
+# Pedir Auth Key y sobrescribir
+# ------------------------------
+read -p "Introduce tu Auth Key de BeamMP Server: " AUTH_KEY
+sed -i "s|^AuthKey\s*=.*|AuthKey = \"$AUTH_KEY\"|" "$BEAMMP_DIR/ServerConfig.toml"
 
 # ------------------------------
 # Configurar servicio systemd BeamMP
@@ -115,10 +129,10 @@ EOF
 echo "Copiando panel web a $APP_DIR..."
 rm -rf $APP_DIR
 mkdir -p $APP_DIR
-cp app.py $APP_DIR/
+cp "$SCRIPT_DIR/app.py" $APP_DIR/
 mkdir -p $APP_DIR/templates $APP_DIR/static
-cp -r templates/* $APP_DIR/templates/
-cp -r static/* $APP_DIR/static/
+cp -r "$SCRIPT_DIR/templates/"* $APP_DIR/templates/
+cp -r "$SCRIPT_DIR/static/"* $APP_DIR/static/
 
 echo "Creando entorno virtual Python..."
 cd $APP_DIR
@@ -127,7 +141,7 @@ source venv/bin/activate
 
 echo "Instalando dependencias Python del panel..."
 pip install --upgrade pip
-pip install -r requirements.txt
+pip install Flask gunicorn
 
 # ------------------------------
 # Configurar servicio systemd para panel
