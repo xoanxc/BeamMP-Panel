@@ -6,7 +6,6 @@ import threading
 # Inicializar Flask
 # -------------------------
 app = Flask(__name__)
-app.secret_key = "4Bsj$@D6cg&gQ5%zZnWpiszLAn7sBTYw"  # Necesario para usar flash
 
 # -------------------------
 # Lock para evitar reinicios simultáneos o cambios de mapa simultáneos
