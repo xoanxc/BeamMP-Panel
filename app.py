@@ -139,7 +139,7 @@ def index():
     )
 
 # -------------------------
-# Ejecutar en modo desarrollo (solo pruebas)
+# Ejecutar en modo desarrollo
 # -------------------------
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
