@@ -31,7 +31,7 @@ Una vez terminado, el servidor y el panel web estarán corriendo:
 
 ##### Mapas Vanilla
 
-Ya vienen incluidos en app.py:
+Ya vienen incluidos en ```app.py```:
 
 ```python
 maps_normal = {
