@@ -6,7 +6,7 @@ Este repositorio contiene un script `install.sh` que instala y configura automá
 
 ## Instalación
 
-1. Clona el repositorio y ejecuta el instalador:
+### 1. Clona el repositorio y ejecuta el instalador:
 
 ```bash
 git clone https://github.com/xoanxc/BeamMP-Panel.git
@@ -14,12 +14,12 @@ cd ./BeamMP-Panel
 chmod +x install.sh
 ./install.sh
 ```
-2. AuthKey
+### 2. AuthKey
 
 Durante la instalación se te pedirá tu AuthKey de BeamMP Server.
 Puedes obtenerla en: https://keymaster.beammp.com/
 
-3. Listo!
+### 3. Listo!
 
 Una vez terminado, el servidor y el panel web estarán corriendo:
 
@@ -27,9 +27,9 @@ Una vez terminado, el servidor y el panel web estarán corriendo:
 
 - Panel web: puerto 5000
 
-### Configuración de mapas
+## Configuración de mapas
 
-##### Mapas Vanilla
+#### Mapas Vanilla
 
 Ya vienen incluidos en `app.py`:
 
@@ -41,7 +41,7 @@ maps_normal = {
 }
 ```
 
-##### Mapas de Mods
+#### Mapas de Mods
 
 Se pueden añadir fácilmente editando `app.py`
 
@@ -52,7 +52,7 @@ maps_mods = {
 }
 ```
 
-#### Notas
+### Notas
 
 - Durante la instalación, se genera una `secret_key``` única para el panel web, usada por Flask para las sesiones y flash.
 
