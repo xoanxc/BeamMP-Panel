@@ -41,7 +41,7 @@ maps_normal = {
 }
 ```
 
-###### Mapas de Mods
+##### Mapas de Mods
 
 Se pueden añadir fácilmente editando ```app.py```
 
