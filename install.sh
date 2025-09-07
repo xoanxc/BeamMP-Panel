@@ -46,7 +46,7 @@ echo "Detectado: $DISTRO $DISTROVERSION $ARCH"
 # ------------------------------
 echo "Instalando dependencias..."
 apt update -y
-apt install -y python3 python3-venv python3-pip git curl unzip wget liblua5.3-dev cmake make g++ tar zip
+apt install -y python3 python3-venv python3-pip git curl unzip wget liblua5.3-dev cmake make g++ tar zip openssl
 
 # ------------------------------
 # Descargar e instalar BeamMP Server
