@@ -29,7 +29,7 @@ Una vez terminado, el servidor y el panel web estarán corriendo:
 
 ### Configuración de mapas
 
-Mapas Vanilla
+##### Mapas Vanilla
 
 Ya vienen incluidos en app.py:
 
@@ -41,7 +41,7 @@ maps_normal = {
 }
 ```
 
-Mapas de Mods
+###### Mapas de Mods
 
 Se pueden añadir fácilmente editando ```app.py```
 
@@ -54,6 +54,6 @@ maps_mods = {
 
 #### Notas
 
-- Durante la instalación, se genera una secret_key única para el panel web, usada por Flask para las sesiones y flash.
+- Durante la instalación, se genera una ```secret_key``` única para el panel web, usada por Flask para las sesiones y flash.
 
 - Si ejecutas app.py directamente sin instalar con install.sh, se usa una ```secret_key``` por defecto ```default_dev_key```.
