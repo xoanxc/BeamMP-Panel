@@ -6,6 +6,7 @@ import threading
 # Inicializar Flask
 # -------------------------
 app = Flask(__name__)
+app.secret_key = "default_dev_key"  # será reemplazada en install.sh
 
 # -------------------------
 # Lock para evitar reinicios simultáneos o cambios de mapa simultáneos

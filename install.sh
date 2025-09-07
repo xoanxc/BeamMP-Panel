@@ -134,6 +134,14 @@ mkdir -p $APP_DIR/templates $APP_DIR/static
 cp -r "$SCRIPT_DIR/templates/"* $APP_DIR/templates/
 cp -r "$SCRIPT_DIR/static/"* $APP_DIR/static/
 
+# Generar secret key aleatoria
+echo "Generando secret key de app.py..."
+SECRET_KEY=$(openssl rand -hex 32)
+
+# Reemplazar la línea que empieza con app.secret_key =
+sed -i "s|^app.secret_key = .*|app.secret_key = \"$SECRET_KEY\"|" $APP_DIR/app.py
+chmod 600 $APP_DIR/app.py
+
 echo "Creando entorno virtual Python..."
 cd $APP_DIR
 python3 -m venv venv
