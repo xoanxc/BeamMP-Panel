@@ -39,6 +39,9 @@ case $ARCH in
     *) echo "Arquitectura $ARCH no soportada."; exit 1 ;;
 esac
 
+ASSET_EXACT="BeamMP-Server.${DISTRO}.${DISTROVERSION}.${ARCH}"
+FILTER_EXCLUDE="grep -v debuginfo"
+
 echo "Detectado: $DISTRO $DISTROVERSION $ARCH"
 
 # ------------------------------
@@ -55,12 +58,11 @@ echo "Preparando directorio de BeamMP Server en $BEAMMP_DIR..."
 mkdir -p $BEAMMP_DIR
 cd $BEAMMP_DIR
 
-ASSET_EXACT="BeamMP-Server.${DISTRO}.${DISTROVERSION}.${ARCH}"
-
 echo "Buscando binario de BeamMP Server..."
 URL=$(curl -s https://api.github.com/repos/BeamMP/BeamMP-Server/releases/latest \
     | grep "browser_download_url" \
     | grep "$ASSET_EXACT" \
+    | $FILTER_EXCLUDE \
     | cut -d '"' -f 4)
 
 if [ -z "$URL" ]; then
@@ -70,6 +72,7 @@ if [ -z "$URL" ]; then
         | grep "browser_download_url" \
         | grep "$DISTRO" \
         | grep "$ARCH" \
+        | $FILTER_EXCLUDE \
         | cut -d '"' -f 4 \
         | sort -V \
         | tail -n1)
