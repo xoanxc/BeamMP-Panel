@@ -48,7 +48,7 @@ echo "Detectado: $DISTRO $DISTROVERSION $ARCH"
 # Instalar dependencias
 # ------------------------------
 echo "Instalando dependencias..."
-apt update -y
+apt update
 apt install -y python3 python3-venv python3-pip git curl unzip wget liblua5.3-dev cmake make g++ tar zip openssl
 
 # ------------------------------
@@ -104,7 +104,7 @@ fi
 # ------------------------------
 # Pedir Auth Key y sobrescribir
 # ------------------------------
-read -p "Introduce tu Auth Key de BeamMP Server: " AUTH_KEY
+read -rep "Introduce tu Auth Key de BeamMP Server: " AUTH_KEY
 sed -i "s|^AuthKey\s*=.*|AuthKey = \"$AUTH_KEY\"|" "$BEAMMP_DIR/ServerConfig.toml"
 
 # ------------------------------
