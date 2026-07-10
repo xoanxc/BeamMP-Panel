@@ -1,17 +1,68 @@
 #!/bin/bash
+# set -e asegura que el script se detenga si ocurre un error crítico
 set -e
 
+# ==========================================
+# VARIABLES DE ENTORNO
+# ==========================================
 APP_DIR="/opt/beammp-web"
 BEAMMP_DIR="/opt/beammp"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SERVICE_PANEL="/etc/systemd/system/beammp-web.service"
 SERVICE_BEAMMP="/etc/systemd/system/beammp.service"
 
-# ------------------------------
-# Limpiar instalaciones previas
-# ------------------------------
-echo "Eliminando instalaciones previas en /opt..."
-rm -rf "$BEAMMP_DIR" "$APP_DIR"
+# ==========================================
+# FUNCIONES DE LOGGING
+# ==========================================
+log_info() { echo "[INFO] $1"; }
+log_warn() { echo "[WARN] $1"; }
+log_err()  { echo "[ERROR] $1"; exit 1; }
+
+# ==========================================
+# FUNCIÓN: ACTUALIZAR PANEL WEB
+# ==========================================
+update_panel() {
+    log_info "Iniciando actualizacion del panel web..."
+    
+    systemctl stop beammp-web 2>/dev/null || true
+    
+    log_info "Copiando nuevos archivos a $APP_DIR..."
+    cp "$SCRIPT_DIR/app.py" "$APP_DIR/"
+    mkdir -p "$APP_DIR/templates"
+    cp -r "$SCRIPT_DIR/templates/"* "$APP_DIR/templates/"
+    
+    log_info "Reiniciando el servicio del panel web..."
+    systemctl daemon-reload
+    systemctl start beammp-web
+    
+    log_info "Panel web actualizado correctamente. Operacion finalizada."
+    exit 0
+}
+
+# 1. Comprobar si se ha pasado el parámetro "update"
+if [ "$1" == "update" ]; then
+    update_panel
+fi
+
+# 2. Comprobar si ya existe una instalación y preguntar al usuario
+if [ -d "$APP_DIR" ] && [ -f "$SERVICE_PANEL" ]; then
+    log_warn "Se ha detectado una instalacion existente del panel web."
+    read -p "¿Que deseas hacer? [a]ctualizar panel / [r]einstalar servidor completo (a/r): " RESPUESTA
+    if [[ "$RESPUESTA" == "a" || "$RESPUESTA" == "A" ]]; then
+        update_panel
+    fi
+fi
+
+# ==========================================
+# INSTALACIÓN COMPLETA
+# ==========================================
+log_info "Iniciando instalacion o reinstalacion completa..."
+
+log_info "Deteniendo servicios en ejecucion..."
+systemctl stop beammp beammp-web 2>/dev/null || true
+
+log_info "Limpiando instalacion previa del panel web..."
+rm -rf "$APP_DIR"
 
 # ------------------------------
 # Detectar distro y arquitectura
@@ -25,7 +76,6 @@ else
     DISTROVERSION=$(echo "$VERSION_ID" | cut -d. -f1)
 fi
 
-# Si no se detecta versión, asignar por defecto
 if [ "$DISTRO" = "debian" ] && [ -z "$DISTROVERSION" ]; then
     DISTROVERSION="12"
 elif [ "$DISTRO" = "ubuntu" ] && [ -z "$DISTROVERSION" ]; then
@@ -36,82 +86,68 @@ ARCH=$(uname -m)
 case $ARCH in
     x86_64) ARCH="x86_64" ;;
     aarch64|arm64) ARCH="arm64" ;;
-    *) echo "Arquitectura $ARCH no soportada."; exit 1 ;;
+    *) log_err "Arquitectura $ARCH no soportada." ;;
 esac
 
 ASSET_EXACT="BeamMP-Server.${DISTRO}.${DISTROVERSION}.${ARCH}"
-FILTER_EXCLUDE="grep -v debuginfo"
-
-echo "Detectado: $DISTRO $DISTROVERSION $ARCH"
+log_info "Sistema detectado: $DISTRO $DISTROVERSION $ARCH"
 
 # ------------------------------
 # Instalar dependencias
 # ------------------------------
-echo "Instalando dependencias..."
-apt update
-apt install -y python3 python3-venv python3-pip git curl unzip wget liblua5.3-dev cmake make g++ tar zip openssl
+log_info "Instalando dependencias necesarias (esto puede tardar unos segundos)..."
+export DEBIAN_FRONTEND=noninteractive
+apt-get update -qq
+apt-get install -y -qq python3 python3-venv python3-pip git curl unzip wget liblua5.3-dev cmake make g++ tar zip openssl jq > /dev/null
 
 # ------------------------------
 # Descargar e instalar BeamMP Server
 # ------------------------------
-echo "Preparando directorio de BeamMP Server en $BEAMMP_DIR..."
-mkdir -p $BEAMMP_DIR
-cd $BEAMMP_DIR
+log_info "Preparando directorio de BeamMP Server en $BEAMMP_DIR..."
+mkdir -p "$BEAMMP_DIR"
+cd "$BEAMMP_DIR"
 
-echo "Buscando binario de BeamMP Server..."
-URL=$(curl -s https://api.github.com/repos/BeamMP/BeamMP-Server/releases/latest \
-    | grep "browser_download_url" \
-    | grep "$ASSET_EXACT" \
-    | $FILTER_EXCLUDE \
-    | cut -d '"' -f 4)
+log_info "Consultando API de GitHub para la ultima version..."
+API_RESPONSE=$(curl -s https://api.github.com/repos/BeamMP/BeamMP-Server/releases/latest)
 
-if [ -z "$URL" ]; then
-    echo "No se encontró binario exacto para ${DISTRO} ${DISTROVERSION} ${ARCH}."
-    echo "Buscando la versión más reciente compatible..."
-    URL=$(curl -s https://api.github.com/repos/BeamMP/BeamMP-Server/releases/latest \
-        | grep "browser_download_url" \
-        | grep "$DISTRO" \
-        | grep "$ARCH" \
-        | $FILTER_EXCLUDE \
-        | cut -d '"' -f 4 \
-        | sort -V \
-        | tail -n1)
-    if [ -n "$URL" ]; then
-        echo "Se usará la versión más reciente disponible: $URL"
-    else
-        echo "No se encontró ningún binario compatible para ${DISTRO} ${ARCH}. Abortando."
-        exit 1
+# Usamos jq para extraer la URL exacta evitando versiones debuginfo
+URL=$(echo "$API_RESPONSE" | jq -r ".assets[] | select(.name | contains(\"$ASSET_EXACT\") and (contains(\"debuginfo\") | not)) | .browser_download_url" | head -n 1)
+
+if [ -z "$URL" ] || [ "$URL" == "null" ]; then
+    log_warn "No se encontro binario exacto para ${DISTRO} ${DISTROVERSION} ${ARCH}."
+    log_info "Buscando la version mas reciente compatible..."
+    URL=$(echo "$API_RESPONSE" | jq -r ".assets[] | select(.name | contains(\"$DISTRO\") and contains(\"$ARCH\") and (contains(\"debuginfo\") | not)) | .browser_download_url" | sort -V | tail -n 1)
+    
+    if [ -z "$URL" ] || [ "$URL" == "null" ]; then
+        log_err "No se encontro ningun binario compatible para $DISTRO $ARCH. Abortando."
     fi
-else
-    echo "Se encontró binario exacto: $URL"
 fi
 
-echo "Descargando BeamMP Server..."
+log_info "Descargando BeamMP Server desde: $URL"
 wget -q "$URL" -O BeamMP-Server
 chmod +x BeamMP-Server
 
 # ------------------------------
-# Ejecutar BeamMP Server inicialmente para generar archivos si no existen
+# Configuración inicial (Solo si es nuevo)
 # ------------------------------
 if [ ! -f "$BEAMMP_DIR/ServerConfig.toml" ]; then
-    echo "Ejecutando BeamMP Server por primera vez (silencioso) para generar archivos..."
+    log_info "Generando archivos de configuracion iniciales..."
     ./BeamMP-Server &> /dev/null &
     SERVER_PID=$!
     sleep 3
     kill $SERVER_PID || true
+    
+    read -rep "Introduce tu Auth Key de BeamMP Server: " AUTH_KEY
+    sed -i "s|^AuthKey\s*=.*|AuthKey = \"$AUTH_KEY\"|" "$BEAMMP_DIR/ServerConfig.toml"
+else
+    log_info "Archivo de configuracion existente detectado. Se conservan Auth Key y configuraciones previas."
 fi
-
-# ------------------------------
-# Pedir Auth Key y sobrescribir
-# ------------------------------
-read -rep "Introduce tu Auth Key de BeamMP Server: " AUTH_KEY
-sed -i "s|^AuthKey\s*=.*|AuthKey = \"$AUTH_KEY\"|" "$BEAMMP_DIR/ServerConfig.toml"
 
 # ------------------------------
 # Configurar servicio systemd BeamMP
 # ------------------------------
-echo "Creando servicio systemd para BeamMP Server..."
-cat > $SERVICE_BEAMMP <<EOF
+log_info "Creando servicio systemd para BeamMP Server..."
+cat > "$SERVICE_BEAMMP" <<EOF
 [Unit]
 Description=BeamMP Dedicated Server
 After=network.target
@@ -127,39 +163,32 @@ WantedBy=multi-user.target
 EOF
 
 # ------------------------------
-# Instalar panel web desde archivos locales
+# Instalar panel web
 # ------------------------------
-echo "Copiando panel web a $APP_DIR..."
-rm -rf $APP_DIR
-mkdir -p $APP_DIR
-cp "$SCRIPT_DIR/app.py" $APP_DIR/
+log_info "Copiando panel web a $APP_DIR..."
+mkdir -p "$APP_DIR/templates"
+cp "$SCRIPT_DIR/app.py" "$APP_DIR/"
+cp -r "$SCRIPT_DIR/templates/"* "$APP_DIR/templates/"
 
-# Solo creamos y copiamos templates, eliminando la referencia a static
-mkdir -p $APP_DIR/templates
-cp -r "$SCRIPT_DIR/templates/"* $APP_DIR/templates/
-
-# Generar secret key aleatoria
-echo "Generando secret key de app.py..."
+log_info "Generando secret key para la aplicacion Flask..."
 SECRET_KEY=$(openssl rand -hex 32)
+sed -i "s|^app.secret_key = .*|app.secret_key = \"$SECRET_KEY\"|" "$APP_DIR/app.py"
+chmod 600 "$APP_DIR/app.py"
 
-# Reemplazar la línea que empieza con app.secret_key =
-sed -i "s|^app.secret_key = .*|app.secret_key = \"$SECRET_KEY\"|" $APP_DIR/app.py
-chmod 600 $APP_DIR/app.py
-
-echo "Creando entorno virtual Python..."
-cd $APP_DIR
+log_info "Creando entorno virtual de Python..."
+cd "$APP_DIR"
 python3 -m venv venv
 source venv/bin/activate
 
-echo "Instalando dependencias Python del panel..."
-pip install --upgrade pip
-pip install Flask gunicorn
+log_info "Instalando dependencias de Python (Flask, gunicorn)..."
+pip install --upgrade pip -q
+pip install Flask gunicorn -q
 
 # ------------------------------
 # Configurar servicio systemd para panel
 # ------------------------------
-echo "Creando servicio systemd para el panel web..."
-cat > $SERVICE_PANEL <<EOF
+log_info "Creando servicio systemd para el panel web..."
+cat > "$SERVICE_PANEL" <<EOF
 [Unit]
 Description=BeamMP Web Control Panel
 After=network.target beammp.service
@@ -178,15 +207,15 @@ EOF
 # ------------------------------
 # Activar y arrancar servicios
 # ------------------------------
-echo "Activando servicios..."
+log_info "Activando y reiniciando servicios de sistema..."
 systemctl daemon-reload
-systemctl enable beammp
-systemctl enable beammp-web
+systemctl enable beammp >/dev/null 2>&1
+systemctl enable beammp-web >/dev/null 2>&1
 systemctl restart beammp
 systemctl restart beammp-web
 
-echo "------------------------------------------"
-echo "Instalación completada."
-echo "Servidor BeamMP corriendo en el puerto 30814"
-echo "Panel web disponible en el puerto 5000"
-echo "------------------------------------------"
+echo "--------------------------------------------------------"
+log_info "Instalacion/Reinstalacion completada con exito."
+log_info "Servidor BeamMP escuchando en el puerto 30814"
+log_info "Panel web de control disponible en el puerto 5000"
+echo "--------------------------------------------------------"
