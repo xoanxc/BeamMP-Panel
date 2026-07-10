@@ -28,6 +28,7 @@ update_panel() {
     
     log_info "Copiando nuevos archivos a $APP_DIR..."
     cp "$SCRIPT_DIR/app.py" "$APP_DIR/"
+    cp "$SCRIPT_DIR/maps.json" "$APP_DIR/"
     mkdir -p "$APP_DIR/templates"
     cp -r "$SCRIPT_DIR/templates/"* "$APP_DIR/templates/"
     
@@ -168,6 +169,7 @@ EOF
 log_info "Copiando panel web a $APP_DIR..."
 mkdir -p "$APP_DIR/templates"
 cp "$SCRIPT_DIR/app.py" "$APP_DIR/"
+cp "$SCRIPT_DIR/maps.json" "$APP_DIR/"
 cp -r "$SCRIPT_DIR/templates/"* "$APP_DIR/templates/"
 
 log_info "Generando secret key para la aplicacion Flask..."
