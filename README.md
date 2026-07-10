@@ -77,9 +77,3 @@ Asegúrate de tener estos puertos abiertos en tu firewall (iptables, ufw, o el p
 ## Licencia
 
 Este proyecto se distribuye bajo la Licencia MIT. Consulta el archivo `LICENSE` para más detalles.
-
-```
-
-Este formato proporciona una documentación clara, técnica y estructurada, ideal para que cualquier administrador de sistemas o desarrollador comprenda cómo instalar y mantener el proyecto.
-
-```
