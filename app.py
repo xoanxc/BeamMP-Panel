@@ -104,6 +104,64 @@ def map_name_friendly(map_path):
             return name
     return map_path
 
+import os
+from flask import jsonify
+
+# -------------------------
+# Función para obtener jugadores leyendo el archivo Log
+# -------------------------
+def get_connected_players():
+    log_path = "/opt/beammp/Server.log"
+    # Si el servidor acaba de instalarse y no hay log, devolvemos 0
+    if not os.path.exists(log_path):
+        return 0
+        
+    connected_players = 0
+    try:
+        with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
+            lines = f.readlines()
+            
+        # Analizamos las últimas 500 líneas para ser más rápidos
+        for line in lines[-500:]:
+            # Cuando un jugador entra al servidor
+            if "has joined the server" in line:
+                connected_players += 1
+            # Cuando un jugador sale del servidor
+            elif "has left the server" in line or "has timed out" in line:
+                connected_players -= 1
+                
+        # Asegurarnos de que no baje de 0 por errores de lectura
+        return max(0, connected_players)
+    except Exception as e:
+        print(f"Error leyendo logs: {e}")
+        return 0
+
+def get_max_players():
+    # Leemos los jugadores máximos configurados en el archivo TOML
+    try:
+        with open(CONFIG_PATH, "r") as f:
+            for line in f:
+                if line.strip().startswith("MaxCars ="):
+                    # MaxCars en BeamMP determina el número de jugadores/vehículos
+                    return int(line.split("=", 1)[1].strip())
+    except:
+        pass
+    return 10 # Valor por defecto si no lo encuentra
+
+# -------------------------
+# Ruta API para el frontend
+# -------------------------
+@app.route("/api/status")
+def api_status():
+    jugadores = get_connected_players()
+    maximos = get_max_players()
+    
+    return jsonify({
+        "status": "online",
+        "players": jugadores,
+        "max_players": maximos
+    })
+    
 # -------------------------
 # Ruta principal del panel
 # -------------------------

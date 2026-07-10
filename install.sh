@@ -133,9 +133,10 @@ echo "Copiando panel web a $APP_DIR..."
 rm -rf $APP_DIR
 mkdir -p $APP_DIR
 cp "$SCRIPT_DIR/app.py" $APP_DIR/
-mkdir -p $APP_DIR/templates $APP_DIR/static
+
+# Solo creamos y copiamos templates, eliminando la referencia a static
+mkdir -p $APP_DIR/templates
 cp -r "$SCRIPT_DIR/templates/"* $APP_DIR/templates/
-cp -r "$SCRIPT_DIR/static/"* $APP_DIR/static/
 
 # Generar secret key aleatoria
 echo "Generando secret key de app.py..."
