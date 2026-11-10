@@ -2,88 +2,198 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BeamMP Control Panel</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+    <meta name="max-upload" content="{{ max_upload }}">
+    <title>Panel BeamMP</title>
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <script src="{{ url_for('static', filename='app.js') }}" defer></script>
 </head>
-<body class="bg-gray-900 text-gray-100 flex items-center justify-center min-h-screen p-4">
+<body>
+<div class="shell">
+    <aside class="sidebar">
+        <div class="brand">
+            <span class="brand-mark" aria-hidden="true"></span>
+            <span class="brand-name">Panel BeamMP</span>
+        </div>
+        <nav class="nav" aria-label="Secciones">
+            <a href="#resumen" data-view="resumen">Resumen</a>
+            <a href="#mapas" data-view="mapas">Mapas</a>
+            <a href="#mods" data-view="mods">Mods</a>
+            <a href="#ajustes" data-view="ajustes">Ajustes</a>
+            <a href="#registro" data-view="registro">Registro</a>
+            <a href="#cuenta" data-view="cuenta">Cuenta</a>
+        </nav>
+        <form method="post" action="{{ url_for('logout') }}" class="sidebar-foot">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <span class="whoami" id="whoami">{{ username }}</span>
+            <button type="submit" class="btn btn-quiet">Salir</button>
+        </form>
+    </aside>
 
-<div class="bg-gray-800 p-8 rounded-xl shadow-2xl w-full max-w-lg border border-gray-700">
-    <h1 class="text-3xl font-bold text-blue-400 mb-6 text-center">Panel de Control <span class="text-white">BeamMP</span></h1>
+    <main class="main">
+        <p class="notice notice-warn" id="default-credentials" hidden>
+            Sigues usando admin / admin. Cualquiera que llegue a esta dirección puede controlar el servidor.
+            <a href="#cuenta">Cambia la contraseña</a>
+        </p>
+        <p class="notice notice-error" id="config-missing" hidden>
+            No se encuentra ServerConfig.toml. Comprueba que BeamMP Server está instalado en la carpeta configurada.
+        </p>
 
-    {% with messages = get_flashed_messages() %}
-      {% if messages %}
-        {% for message in messages %}
-          <div class="bg-green-500 bg-opacity-20 border border-green-500 text-green-400 p-3 rounded mb-4 text-center">
-            {{ message }}
-          </div>
-        {% endfor %}
-      {% endif %}
-    {% endwith %}
+        <!-- Resumen -->
+        <section class="view" id="view-resumen">
+            <div class="dash">
+                <div class="panel cluster">
+                    <svg class="gauge" viewBox="0 0 220 130" role="img" aria-labelledby="gauge-label">
+                        <path class="gauge-track" d="M 20 115 A 90 90 0 0 1 200 115" pathLength="100"/>
+                        <path class="gauge-value" id="gauge-value" d="M 20 115 A 90 90 0 0 1 200 115" pathLength="100" stroke-dasharray="0 100"/>
+                        <text class="gauge-number" id="gauge-number" x="110" y="98" text-anchor="middle">–</text>
+                        <text class="gauge-caption" id="gauge-label" x="110" y="122" text-anchor="middle">jugadores</text>
+                    </svg>
+                    <div class="cluster-info">
+                        <h1 id="server-name">Servidor BeamMP</h1>
+                        <p class="state" id="state" data-state="unknown">
+                            <span class="state-lamp" aria-hidden="true"></span>
+                            <span id="state-text">Consultando…</span>
+                        </p>
+                        <p class="muted" id="uptime"></p>
+                        <div class="actions">
+                            <button class="btn btn-primary" data-server-action="start" id="btn-start">Arrancar</button>
+                            <button class="btn" data-server-action="restart" id="btn-restart">Reiniciar</button>
+                            <button class="btn btn-danger" data-server-action="stop" id="btn-stop">Detener</button>
+                        </div>
+                    </div>
+                </div>
 
-    <div class="bg-gray-900 p-5 rounded-lg mb-6 flex justify-between items-center border border-gray-700">
-        <div>
-            <p class="text-sm text-gray-400 uppercase tracking-wider">Estado</p>
-            <p class="text-lg font-semibold text-green-400 flex items-center gap-2">
-                <span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span> Online
+                <div class="panel">
+                    <h2>Mapa en uso</h2>
+                    <p class="big" id="current-map">–</p>
+                    <p class="muted path" id="current-map-path"></p>
+                    <a class="btn" href="#mapas">Cambiar de mapa</a>
+                </div>
+
+                <div class="panel">
+                    <h2>Jugadores conectados</h2>
+                    <ul class="players" id="players"></ul>
+                    <p class="muted" id="players-empty">Nadie conectado ahora mismo.</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Mapas -->
+        <section class="view" id="view-mapas" hidden>
+            <header class="view-head">
+                <h1>Mapas</h1>
+                <input type="search" id="map-filter" placeholder="Buscar mapa" aria-label="Buscar mapa">
+            </header>
+            <p class="muted">Al elegir un mapa el servidor se reinicia y los jugadores se desconectan.</p>
+
+            <h2>De mods <span class="count" id="mod-map-count"></span></h2>
+            <div class="map-grid" id="mod-maps"></div>
+            <p class="empty" id="mod-maps-empty" hidden>
+                Todavía no hay mapas de mods. Sube el .zip de un mapa en <a href="#mods">Mods</a> y aparecerá aquí solo.
             </p>
-        </div>
-        <div class="text-right">
-            <p class="text-sm text-gray-400 uppercase tracking-wider">Jugadores</p>
-            <p class="text-2xl font-bold text-white" id="player-count">-- / --</p>
-        </div>
-    </div>
 
-    <div class="mb-8 text-center bg-gray-700 py-3 rounded-lg">
-        <p class="text-gray-300">Mapa actual: <span class="text-blue-300 font-bold ml-2">{{ current_map }}</span></p>
-    </div>
+            <h2>Oficiales <span class="count" id="official-map-count"></span></h2>
+            <div class="chip-grid" id="official-maps"></div>
+        </section>
 
-    <section class="mb-6">
-        <h2 class="text-yellow-500 font-semibold mb-3 border-b border-gray-600 pb-1">Mapas Oficiales</h2>
-        <form method="post" class="flex gap-3">
-            <select name="map_normal" class="flex-1 bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-blue-400">
-                {% for name in maps_normal.keys() %}
-                    <option value="{{name}}">{{name}}</option>
-                {% endfor %}
-            </select>
-            <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white font-semibold py-2 px-4 rounded-lg transition">Cambiar</button>
-        </form>
-    </section>
+        <!-- Mods -->
+        <section class="view" id="view-mods" hidden>
+            <header class="view-head">
+                <h1>Mods</h1>
+                <button class="btn" id="rescan">Volver a analizar</button>
+            </header>
 
-    <section class="mb-6">
-        <h2 class="text-yellow-500 font-semibold mb-3 border-b border-gray-600 pb-1">Mapas de Mods</h2>
-        <form method="post" class="flex gap-3">
-            <select name="map_mod" class="flex-1 bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-blue-400">
-                {% for name in maps_mods.keys() %}
-                    <option value="{{name}}">{{name}}</option>
-                {% endfor %}
-            </select>
-            <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white font-semibold py-2 px-4 rounded-lg transition">Cambiar</button>
-        </form>
-    </section>
+            <div class="dropzone" id="dropzone">
+                <p><strong>Arrastra aquí los .zip</strong> de mapas, coches u otros mods</p>
+                <p class="muted" id="upload-limit"></p>
+                <label class="btn btn-primary">
+                    Elegir archivos
+                    <input type="file" id="file-input" accept=".zip" multiple hidden>
+                </label>
+            </div>
+            <ul class="uploads" id="uploads"></ul>
+            <p class="notice notice-info" id="restart-hint" hidden>
+                Los mods nuevos se cargan al reiniciar el servidor.
+                <button class="btn btn-small" data-server-action="restart">Reiniciar ahora</button>
+            </p>
 
-    <form method="post" class="mt-8 text-center border-t border-gray-700 pt-6">
-        <input type="hidden" name="restart" value="1">
-        <button type="submit" class="bg-red-600 hover:bg-red-500 text-white text-sm font-semibold py-2 px-6 rounded-lg transition" onclick="return confirm('¿Estás seguro de que quieres reiniciar el servidor? Esto desconectará a todos los jugadores.');">
-            Reiniciar Servidor
-        </button>
-    </form>
+            <div class="table-wrap">
+                <table class="table" id="mods-table">
+                    <thead>
+                        <tr><th>Archivo</th><th>Tipo</th><th class="num">Tamaño</th><th>Fecha</th><th></th></tr>
+                    </thead>
+                    <tbody id="mods-body"></tbody>
+                </table>
+            </div>
+            <p class="empty" id="mods-empty" hidden>No hay ningún mod instalado.</p>
+            <p class="muted" id="mods-foot"></p>
+        </section>
+
+        <!-- Ajustes -->
+        <section class="view" id="view-ajustes" hidden>
+            <header class="view-head"><h1>Ajustes del servidor</h1></header>
+            <form class="panel form" id="config-form">
+                <div id="config-fields"></div>
+                <div class="actions">
+                    <button type="submit" class="btn btn-primary" data-restart="1">Guardar y reiniciar</button>
+                    <button type="submit" class="btn" data-restart="0">Guardar sin reiniciar</button>
+                </div>
+                <p class="muted">Los cambios se aplican cuando el servidor se reinicia.</p>
+            </form>
+        </section>
+
+        <!-- Registro -->
+        <section class="view" id="view-registro" hidden>
+            <header class="view-head">
+                <h1>Registro del servidor</h1>
+                <label class="check"><input type="checkbox" id="log-follow" checked> Seguir el final</label>
+            </header>
+            <pre class="log" id="log" tabindex="0"></pre>
+        </section>
+
+        <!-- Cuenta -->
+        <section class="view" id="view-cuenta" hidden>
+            <header class="view-head"><h1>Cuenta</h1></header>
+            <form class="panel form" id="account-form" autocomplete="off">
+                <label class="field">
+                    <span>Usuario</span>
+                    <input type="text" name="username" value="{{ username }}" minlength="3" maxlength="32" required autocomplete="username">
+                </label>
+                <label class="field">
+                    <span>Contraseña actual</span>
+                    <input type="password" name="current_password" required autocomplete="current-password">
+                </label>
+                <label class="field">
+                    <span>Contraseña nueva</span>
+                    <input type="password" name="new_password" minlength="8" required autocomplete="new-password">
+                    <small>Mínimo 8 caracteres.</small>
+                </label>
+                <label class="field">
+                    <span>Repite la contraseña nueva</span>
+                    <input type="password" name="repeat_password" minlength="8" required autocomplete="new-password">
+                </label>
+                <div class="actions">
+                    <button type="submit" class="btn btn-primary">Guardar cuenta</button>
+                </div>
+            </form>
+            <p class="muted">Panel BeamMP {{ version }}</p>
+        </section>
+    </main>
 </div>
 
-<script>
-    async function updateStatus() {
-        try {
-            const response = await fetch('/api/status');
-            const data = await response.json();
-            document.getElementById('player-count').innerText = `${data.players} / ${data.max_players}`;
-        } catch (error) {
-            document.getElementById('player-count').innerText = "Error";
-        }
-    }
-    // Ejecutar al cargar la página y luego cada 5 segundos
-    updateStatus();
-    setInterval(updateStatus, 5000);
-</script>
-
+<dialog class="dialog" id="confirm">
+    <form method="dialog">
+        <h2 id="confirm-title"></h2>
+        <p id="confirm-text"></p>
+        <div class="actions">
+            <button class="btn" value="cancel">Cancelar</button>
+            <button class="btn btn-primary" value="ok" id="confirm-ok">Aceptar</button>
+        </div>
+    </form>
+</dialog>
+<div class="toasts" id="toasts" aria-live="polite"></div>
 </body>
 </html>

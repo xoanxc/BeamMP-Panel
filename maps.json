@@ -1,10 +1,11 @@
 {
     "normal": {
-        "Gridmap": "/levels/gridmap/info.json",
+        "Gridmap V2": "/levels/gridmap_v2/info.json",
         "Automation Test Track": "/levels/automation_test_track/info.json",
         "East Coast USA": "/levels/east_coast_usa/info.json",
         "Hirochi Raceway": "/levels/hirochi_raceway/info.json",
         "Italy": "/levels/italy/info.json",
+        "Johnson Valley": "/levels/johnson_valley/info.json",
         "Jungle Rock Island": "/levels/jungle_rock_island/info.json",
         "Industrial": "/levels/industrial/info.json",
         "Small Island": "/levels/small_island/info.json",
@@ -12,9 +13,8 @@
         "Utah": "/levels/utah/info.json",
         "West Coast USA": "/levels/west_coast_usa/info.json",
         "Driver Training": "/levels/driver_training/info.json",
-        "Derby": "/levels/derby/info.json"
+        "Derby": "/levels/derby/info.json",
+        "Cliff": "/levels/cliff/info.json"
     },
-    "mods": {
-        "Nürburgring": "/levels/ks_nord/info.json"
-    }
+    "mods": {}
 }
