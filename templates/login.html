@@ -1,19 +1,13 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+{% include "_head.html" %}
     <title>Entrar · Panel BeamMP</title>
-    <link rel="icon" href="data:,">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body class="login-page">
     <main class="login-card">
-        <div class="brand">
-            <span class="brand-mark" aria-hidden="true"></span>
-            <span class="brand-name">Panel BeamMP</span>
-        </div>
-        <h1>Inicia sesión</h1>
+        <div class="logo"><span class="logo-plate"><em>Panel</em> BeamMP</span></div>
+        <h1 class="slash">Inicia sesión</h1>
 
         {% if error %}
         <p class="notice notice-error" role="alert">{{ error }}</p>
@@ -32,5 +26,6 @@
             <button type="submit" class="btn btn-primary btn-block">Entrar</button>
         </form>
     </main>
+    <footer class="statusbar"><span class="version">Panel v{{ version }}</span></footer>
 </body>
 </html>

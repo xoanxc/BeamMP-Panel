@@ -62,15 +62,32 @@ class ServerConfig:
     def __init__(self, path: Path):
         self.path = Path(path)
         self._lock = threading.Lock()
+        self._cached: tuple[tuple[int, int], dict] | None = None
 
     def read(self) -> dict:
+        """Secciones del archivo. El resultado se reutiliza mientras el archivo no
+        cambie (tamaño y fecha), así que no debe modificarse."""
+        try:
+            stat = self.path.stat()
+        except OSError:
+            return {}
+        signature = (stat.st_mtime_ns, stat.st_size)
+        cached = self._cached
+        if cached and cached[0] == signature:
+            return cached[1]
+        try:
+            text = self.path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return {}
+        sections = self._parse(text)
+        self._cached = (signature, sections)
+        return sections
+
+    @staticmethod
+    def _parse(text: str) -> dict:
         sections: dict[str, dict] = {}
         current = ""
-        try:
-            lines = self.path.read_text(encoding="utf-8", errors="replace").splitlines()
-        except OSError:
-            return sections
-        for line in lines:
+        for line in text.splitlines():
             if line.lstrip().startswith("#"):
                 continue
             section = _SECTION_RE.match(line)
@@ -84,6 +101,10 @@ class ServerConfig:
 
     def get(self, key: str, default=None, section: str = "General"):
         return self.read().get(section, {}).get(key, default)
+
+    def resources_dir(self, beammp_dir: Path) -> Path:
+        """Carpeta Resources del servidor (clave ResourceFolder)."""
+        return Path(beammp_dir) / str(self.get("ResourceFolder", "Resources") or "Resources")
 
     def update(self, values: dict, section: str = "General") -> None:
         """Cambia (o añade) claves dentro de una sección. Escritura atómica."""
@@ -122,6 +143,7 @@ class ServerConfig:
                 fh.write(content)
             shutil.copymode(self.path, tmp)
             os.replace(tmp, self.path)
+            self._cached = None
         except BaseException:
             if os.path.exists(tmp):
                 os.unlink(tmp)
@@ -179,17 +201,19 @@ class Service:
             result = self._systemctl(
                 "show",
                 self.name,
-                "--property=LoadState,ActiveState,ActiveEnterTimestampMonotonic",
+                "--property=LoadState,ActiveState,ActiveEnterTimestampMonotonic,MainPID",
             )
         except ServiceError:
-            return {"state": "unknown", "uptime": None}
+            return {"state": "unknown", "uptime": None, "pid": None}
         props = dict(
             line.split("=", 1) for line in result.stdout.splitlines() if "=" in line
         )
         if props.get("LoadState") == "not-found":
-            return {"state": "missing", "uptime": None}
+            return {"state": "missing", "uptime": None, "pid": None}
         state = _STATE_NAMES.get(props.get("ActiveState", ""), "unknown")
         uptime = None
+        main_pid = props.get("MainPID", "")
+        pid = int(main_pid) if main_pid.isdigit() else 0
         if state == "online":
             try:
                 # systemd y time.monotonic() usan el mismo reloj (CLOCK_MONOTONIC).
@@ -197,7 +221,7 @@ class Service:
                 uptime = max(0, int(time.monotonic() - started))
             except (KeyError, ValueError):
                 pass
-        return {"state": state, "uptime": uptime}
+        return {"state": state, "uptime": uptime, "pid": pid or None}
 
     def run(self, action: str) -> None:
         if action not in self.ACTIONS:
@@ -219,6 +243,7 @@ _ASSIGNED_RE = re.compile(r"^Assigned ID \d+ to (.+)$")
 _CONNECTED_RE = re.compile(r"^(.+) : Connected$")
 _GONE_RE = re.compile(r"^(.+) Connection Terminated$")
 _BOOT_PREFIX = "BeamMP Server v"
+_VERSION_RE = re.compile(r"^BeamMP Server v(\d+(?:\.\d+)*)")
 
 
 class LogTracker:
@@ -234,11 +259,18 @@ class LogTracker:
         self._inode = None
         self._offset = 0
         self._players: dict[str, None] = {}  # dict para conservar el orden de llegada
+        self._version: str | None = None
 
     def players(self) -> list[str]:
         with self._lock:
             self._catch_up()
             return list(self._players)
+
+    def server_version(self) -> str | None:
+        """Versión de BeamMP Server según su último arranque registrado."""
+        with self._lock:
+            self._catch_up()
+            return self._version
 
     def _catch_up(self) -> None:
         try:
@@ -264,6 +296,9 @@ class LogTracker:
         message = match.group(1)
         if message.startswith(_BOOT_PREFIX):
             self._players.clear()
+            version = _VERSION_RE.match(message)
+            if version:
+                self._version = version.group(1)
             return
         joined = _ASSIGNED_RE.match(message) or _CONNECTED_RE.match(message)
         if joined:
@@ -273,15 +308,53 @@ class LogTracker:
         if gone:
             self._players.pop(gone.group(1), None)
 
-    def tail(self, max_lines: int = 200, max_bytes: int = 256 * 1024) -> list[str]:
+    def forget(self, name: str) -> None:
+        """Quita a un jugador de la lista sin esperar a que el registro lo confirme."""
+        with self._lock:
+            self._players.pop(name, None)
+
+    def follow(self, cursor: str | None = None, max_lines: int = 400, max_bytes: int = 256 * 1024) -> dict:
+        """Líneas completas escritas desde `cursor`.
+
+        Sin cursor (o si el archivo se ha sustituido o recortado) devuelve el
+        final del registro con reset=True. El cursor devuelto se pasa en la
+        siguiente consulta para recibir solo lo nuevo.
+        """
         try:
             with open(self.path, "rb") as fh:
-                size = os.fstat(fh.fileno()).st_size
-                fh.seek(max(0, size - max_bytes))
-                data = fh.read()
+                stat = os.fstat(fh.fileno())
+                start = self._cursor_offset(cursor, stat)
+                reset = start is None or stat.st_size - start > max_bytes
+                if reset:
+                    start = max(0, stat.st_size - max_bytes)
+                fh.seek(start)
+                data = fh.read(stat.st_size - start)
         except OSError:
-            return []
-        lines = data.decode("utf-8", errors="replace").splitlines()
-        if size > max_bytes and lines:
-            lines = lines[1:]  # la primera puede estar cortada
-        return lines[-max_lines:]
+            return {"lines": [], "cursor": None, "reset": True, "found": False}
+        if reset and start > 0:
+            cut = data.find(b"\n") + 1  # la primera línea puede estar cortada
+            data, start = data[cut:], start + cut
+        end = data.rfind(b"\n") + 1  # una línea a medio escribir se deja para la próxima
+        lines = [
+            line.rstrip("\r")
+            for line in data[:end].decode("utf-8", errors="replace").split("\n")[:-1]
+        ]
+        if reset:
+            lines = lines[-max_lines:]
+        return {
+            "lines": lines,
+            "cursor": f"{stat.st_ino}:{start + end}",
+            "reset": reset,
+            "found": True,
+        }
+
+    @staticmethod
+    def _cursor_offset(cursor: str | None, stat: os.stat_result) -> int | None:
+        try:
+            inode, offset = (int(part) for part in (cursor or "").split(":"))
+        except ValueError:
+            return None
+        return offset if inode == stat.st_ino and 0 <= offset <= stat.st_size else None
+
+    def tail(self, max_lines: int = 200) -> list[str]:
+        return self.follow(None, max_lines)["lines"]

@@ -28,6 +28,19 @@ class Settings:
     def custom_maps_file(self) -> Path:
         return self.data_dir / "custom_maps.json"
 
+    @property
+    def previews_dir(self) -> Path:
+        """Imágenes de mapas subidas desde el panel."""
+        return self.data_dir / "previews"
+
+    @property
+    def backups_dir(self) -> Path:
+        return self.data_dir / "backups"
+
+    @property
+    def static_dir(self) -> Path:
+        return BASE_DIR / "static"
+
 
 def load_settings() -> Settings:
     env = os.environ.get

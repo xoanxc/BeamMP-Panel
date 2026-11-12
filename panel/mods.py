@@ -10,9 +10,11 @@ import shutil
 import threading
 import zipfile
 from pathlib import Path
+from urllib.parse import quote
 
 from werkzeug.utils import secure_filename
 
+from .previews import PreviewStore, level_folder
 from .server import ServerConfig
 
 _CHUNK = 1024 * 1024
@@ -134,49 +136,87 @@ class ModLibrary:
         self.config = config
         self.max_upload_bytes = max_upload_bytes
         self._cache: dict[str, tuple[tuple[int, int], dict]] = {}
+        self._listing: tuple[tuple, list[dict]] = ((), [])
         self._lock = threading.Lock()
 
     @property
     def client_dir(self) -> Path:
-        resources = self.config.get("ResourceFolder", "Resources") or "Resources"
-        return self.beammp_dir / str(resources) / "Client"
+        return self.config.resources_dir(self.beammp_dir) / "Client"
+
+    @property
+    def disabled_dir(self) -> Path:
+        """Mods desactivados: BeamMP solo carga lo que hay en Client."""
+        return self.config.resources_dir(self.beammp_dir) / "ClientDisabled"
+
+    def path_of(self, mod: dict) -> Path:
+        return (self.client_dir if mod["enabled"] else self.disabled_dir) / mod["name"]
 
     # -- listado ------------------------------------------------------
-    def list(self) -> list[dict]:
-        """Todos los .zip de Resources/Client con su contenido (resultado cacheado)."""
-        mods = []
-        seen = set()
+    @staticmethod
+    def _scan(folder: Path, enabled: bool) -> list[tuple]:
+        found = []
         try:
-            entries = sorted(self.client_dir.iterdir(), key=lambda p: p.name.lower())
+            with os.scandir(folder) as entries:
+                for entry in entries:
+                    name = entry.name
+                    if name.startswith(".") or not name.lower().endswith(".zip") or not entry.is_file():
+                        continue
+                    stat = entry.stat()
+                    found.append((name, stat.st_size, stat.st_mtime_ns, enabled))
         except OSError:
-            entries = []
-        for entry in entries:
-            if entry.suffix.lower() != ".zip" or entry.name.startswith(".") or not entry.is_file():
-                continue
-            stat = entry.stat()
-            seen.add(entry.name)
-            details = self._inspect_cached(entry, (stat.st_size, stat.st_mtime_ns))
+            pass
+        return found
+
+    def snapshot(self) -> tuple[tuple, list[dict]]:
+        """(firma, mods). La firma solo cambia si cambia algún .zip de las carpetas.
+
+        Mientras la firma no cambie se devuelve la misma lista, sin volver a
+        construirla: quien la reciba no debe modificarla.
+        """
+        found = self._scan(self.client_dir, True) + self._scan(self.disabled_dir, False)
+        found.sort(key=lambda item: (item[0].lower(), not item[3]))
+        signature = (str(self.client_dir), *found)
+        with self._lock:
+            if self._listing[0] == signature:
+                return self._listing
+        mods = []
+        for name, size, mtime_ns, enabled in found:
+            path = (self.client_dir if enabled else self.disabled_dir) / name
             mods.append(
-                {"name": entry.name, "size": stat.st_size, "modified": int(stat.st_mtime), **details}
+                {
+                    "name": name,
+                    "size": size,
+                    "modified": mtime_ns // 1_000_000_000,
+                    "enabled": enabled,
+                    **self._inspect_cached(path, (size, mtime_ns)),
+                }
             )
         with self._lock:
-            for name in set(self._cache) - seen:
-                del self._cache[name]
-        return mods
+            paths = {str((self.client_dir if item[3] else self.disabled_dir) / item[0]) for item in found}
+            for stale in set(self._cache) - paths:
+                del self._cache[stale]
+            self._listing = (signature, mods)
+            return self._listing
+
+    def list(self) -> list[dict]:
+        """Todos los .zip (activos y desactivados) con su contenido."""
+        return self.snapshot()[1]
 
     def _inspect_cached(self, path: Path, signature: tuple[int, int]) -> dict:
+        key = str(path)
         with self._lock:
-            cached = self._cache.get(path.name)
+            cached = self._cache.get(key)
         if cached and cached[0] == signature:
             return cached[1]
         details = inspect_zip(path)
         with self._lock:
-            self._cache[path.name] = (signature, details)
+            self._cache[key] = (signature, details)
         return details
 
     def rescan(self) -> list[dict]:
         with self._lock:
             self._cache.clear()
+            self._listing = ((), [])
         return self.list()
 
     def disk(self) -> dict:
@@ -196,17 +236,32 @@ class ModLibrary:
         return name
 
     def _existing(self, filename: str) -> Path:
+        """Ruta del mod, esté activo o desactivado."""
         name = secure_filename(filename or "")
-        path = self.client_dir / name
-        if not name or name != filename or not path.is_file():
-            raise ModError("Ese mod no existe.", 404)
-        return path
+        if name and name == filename:
+            for folder in (self.client_dir, self.disabled_dir):
+                if (folder / name).is_file():
+                    return folder / name
+        raise ModError("Ese mod no existe.", 404)
+
+    def set_enabled(self, filename: str, enabled: bool) -> None:
+        """Mueve el mod entre Client y ClientDisabled."""
+        source = self._existing(filename)
+        target = (self.client_dir if enabled else self.disabled_dir) / source.name
+        if source == target:
+            return
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(source, target)
+        except OSError as exc:
+            raise ModError(f"No se ha podido mover el mod: {exc}", 500) from exc
 
     def save_upload(self, filename: str, stream, content_length: int | None, overwrite: bool = False) -> str:
         """Guarda el cuerpo de la petición directamente en disco, sin pasar por memoria ni /tmp."""
         name = self.clean_name(filename)
         target = self.client_dir / name
-        if target.exists() and not overwrite:
+        disabled_copy = self.disabled_dir / name
+        if (target.exists() or disabled_copy.exists()) and not overwrite:
             raise ModError(f"Ya existe un mod llamado {name}.", 409)
         if content_length is not None and content_length > self.max_upload_bytes:
             raise ModError("El archivo supera el tamaño máximo permitido.", 413)
@@ -230,6 +285,7 @@ class ModLibrary:
             if inspect_zip(partial)["kind"] == "invalid":
                 raise ModError("El archivo no es un .zip válido.")
             os.replace(partial, target)
+            disabled_copy.unlink(missing_ok=True)  # al sustituirlo queda activo
         finally:
             if partial.exists():
                 partial.unlink()
@@ -238,8 +294,6 @@ class ModLibrary:
     # -- borrado y vistas previas -------------------------------------
     def delete(self, filename: str) -> None:
         self._existing(filename).unlink()
-        with self._lock:
-            self._cache.pop(filename, None)
 
     def preview(self, filename: str, folder: str) -> tuple[bytes, str]:
         path = self._existing(filename)
@@ -273,27 +327,101 @@ def _read_map_file(path: Path) -> tuple[dict, dict]:
     return section("normal"), section("mods")
 
 
-class MapCatalog:
-    """Une tres fuentes: mapas oficiales, mapas añadidos a mano y mapas detectados en los mods."""
+def _file_signature(path: Path) -> tuple[int, int]:
+    try:
+        stat = Path(path).stat()
+        return stat.st_mtime_ns, stat.st_size
+    except OSError:
+        return 0, 0
 
-    def __init__(self, official_file: Path, custom_file: Path, mods: ModLibrary):
+
+class MapCatalog:
+    """Une tres fuentes: mapas oficiales, mapas añadidos a mano y mapas detectados en los mods.
+
+    El catálogo se reconstruye solo cuando cambia alguna de sus fuentes (los dos
+    JSON, los .zip de mods o las imágenes subidas); el resto de consultas usan
+    el resultado guardado.
+    """
+
+    def __init__(self, official_file: Path, custom_file: Path, mods: ModLibrary, previews: PreviewStore, asset_version: str = ""):
         self.official_file = official_file
         self.custom_file = custom_file
         self.mods = mods
+        self.previews = previews
+        self.asset_version = asset_version
+        self._lock = threading.Lock()
+        self._cached: tuple[tuple, dict, dict] | None = None
 
+    # -- consulta -----------------------------------------------------
     def build(self) -> dict:
+        """{'official': [...], 'mods': [...]}. No modificar el resultado."""
+        return self._current()[0]
+
+    def find(self, path: str) -> dict | None:
+        return self._current()[1].get(path)
+
+    def find_folder(self, folder: str) -> dict | None:
+        """Mapa del catálogo cuya carpeta de nivel es `folder`."""
+        wanted = (folder or "").lower()
+        for entry in self._current()[1].values():
+            if (entry["folder"] or "").lower() == wanted:
+                return entry
+        return None
+
+    def name_for(self, path: str) -> str:
+        entry = self.find(path)
+        return entry["name"] if entry else (path or "Desconocido")
+
+    # -- construcción -------------------------------------------------
+    def _current(self) -> tuple[dict, dict]:
+        mods_signature, mods = self.mods.snapshot()
+        signature = (
+            _file_signature(self.official_file),
+            _file_signature(self.custom_file),
+            mods_signature,
+            self.previews.signature(),
+        )
+        with self._lock:
+            if self._cached and self._cached[0] == signature:
+                return self._cached[1], self._cached[2]
+        catalog = self._build(mods)
+        index = {entry["path"]: entry for entry in catalog["mods"] + catalog["official"]}
+        with self._lock:
+            self._cached = (signature, catalog, index)
+        return catalog, index
+
+    def _preview(self, folder: str | None, mod: dict | None = None, in_zip: bool = False) -> dict:
+        """Imagen de un mapa: la subida por el usuario, la del .zip o la ilustración incluida."""
+        custom = self.previews.custom(folder) if folder else None
+        if custom:
+            url = f"/api/maps/image/{quote(folder)}?v={custom[1]}"
+        elif mod and in_zip:
+            url = f"/api/maps/preview?mod={quote(mod['name'])}&folder={quote(folder)}&v={mod['modified']}-{mod['size']}"
+        elif folder and self.previews.has_builtin(folder):
+            url = f"/static/maps/{folder.lower()}.svg?v={self.asset_version}"
+        else:
+            url = None
+        return {"preview": url, "custom_preview": bool(custom)}
+
+    def _build(self, mods: list[dict]) -> dict:
         official, bundled_mods = _read_map_file(self.official_file)
         custom_official, custom_mods = _read_map_file(self.custom_file)
 
         official_maps: dict[str, dict] = {}
         for name, path in {**official, **custom_official}.items():
-            official_maps.setdefault(path.lower(), {"name": name, "path": path})
+            folder = level_folder(path)
+            official_maps.setdefault(
+                path.lower(), {"name": name, "path": path, "folder": folder, **self._preview(folder)}
+            )
 
-        manual_names = {path.lower(): name for name, path in {**bundled_mods, **custom_mods}.items()}
-        manual_paths = {path.lower(): path for path in {**bundled_mods, **custom_mods}.values()}
+        manual = {**bundled_mods, **custom_mods}
+        manual_names = {path.lower(): name for name, path in manual.items()}
+        manual_paths = {path.lower(): path for path in manual.values()}
 
         mod_maps: dict[str, dict] = {}
-        for mod in self.mods.list():
+        for mod in mods:
+            if not mod["enabled"]:
+                continue  # BeamMP no carga los mods desactivados
             for level in mod["levels"]:
                 key = level["path"].lower()
                 if key in official_maps or key in mod_maps:
@@ -303,33 +431,23 @@ class MapCatalog:
                     "path": level["path"],
                     "mod": mod["name"],
                     "folder": level["folder"],
-                    "has_preview": bool(level["preview_member"]),
                     "detected": True,
+                    **self._preview(level["folder"], mod, bool(level["preview_member"])),
                 }
         # Entradas manuales cuyo .zip no se ha encontrado: se muestran, pero avisando.
         for key, path in manual_paths.items():
             if key not in mod_maps and key not in official_maps:
+                folder = level_folder(path)
                 mod_maps[key] = {
                     "name": manual_names[key],
                     "path": path,
                     "mod": None,
-                    "folder": None,
-                    "has_preview": False,
+                    "folder": folder,
                     "detected": False,
+                    **self._preview(folder),
                 }
 
         return {
             "official": list(official_maps.values()),
             "mods": sorted(mod_maps.values(), key=lambda m: m["name"].lower()),
         }
-
-    def find(self, path: str, catalog: dict | None = None) -> dict | None:
-        catalog = catalog or self.build()
-        for entry in catalog["official"] + catalog["mods"]:
-            if entry["path"] == path:
-                return entry
-        return None
-
-    def name_for(self, path: str, catalog: dict | None = None) -> str:
-        entry = self.find(path, catalog)
-        return entry["name"] if entry else (path or "Desconocido")
